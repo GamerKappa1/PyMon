@@ -73,14 +73,21 @@ def write_config(boxes, monitors: list[Monitor]):
 
     for box, monitor in zip(boxes, active_monitors):
         config += (
-        "hl.monitor({\n" +
-        f"    output = \"{monitor.name}\",\n" +
-        f"    mode   = \"{monitor.resolution + "@" + monitor.refresh_rate}\",\n" +
-        f"    position = \"{box.x - offset_x}x{box.y - offset_y}\",\n" +
-        f"    scale = 1,\n" +
-        f"    disabled = {"true" if monitor.disabled.lower().strip() == "true" else "false"},\n" +
-        f"    transform = {monitor.transform}\n" +
-        "})\n")
+                "hl.monitor({\n" +
+                f'    output = "{monitor.name}",\n' +
+                f'    mode = "{monitor.resolution}@{monitor.refresh_rate}",\n' +
+                f'    position = "{box.x - offset_x}x{box.y - offset_y}",\n' +
+                "    scale = 1,\n" +
+                f'    disabled = {"true" if str(monitor.disabled).lower().strip() == "true" else "false"},\n' +
+                f"    transform = {monitor.transform},\n"
+        )
+
+        # Hyprland mirror option: the value is the output name to mirror.
+        mirror_target = getattr(monitor, "mirror", None)
+        if mirror_target:
+            config += f'    mirror = "{mirror_target}",\n'
+
+        config += "})\n"
 
     startline, endline = get_start_end_line_monitors()
     path = Path("~/.config/hypr/hyprland.lua").expanduser()

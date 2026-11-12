@@ -85,6 +85,26 @@ def run(monitors: list[Monitor], divider: int = 8):
             or getattr(mon, "resolution", "0x0") == "0x0"
         ]
 
+    def mirror_target(monitor):
+        """Return the configured mirror output name, or None."""
+        value = getattr(monitor, "mirror", None)
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value if value and value.lower() not in {"none", "off", "false", "0"} else None
+
+    def mirror_root(monitor, by_name):
+        """Resolve a mirrored output to the physical output it ultimately follows."""
+        current = monitor
+        seen = set()
+        while mirror_target(current):
+            target_name = mirror_target(current)
+            if target_name in seen or target_name not in by_name:
+                break
+            seen.add(target_name)
+            current = by_name[target_name]
+        return current
+
     valid_monitors = get_valid_monitors()
 
     # Rebuild boxes based on active monitors
@@ -142,6 +162,18 @@ def run(monitors: list[Monitor], divider: int = 8):
                     b.width,
                     b.height
                 ))
+
+        # A mirrored output is part of its target's visual group. Keep one
+        # box per monitor (Helpers.write_config relies on that ordering), but
+        # place mirrored outputs over their ultimate source box.
+        by_name = {mon.name: i for i, mon in enumerate(valid_monitors)}
+        for i, mon in enumerate(valid_monitors):
+            if mirror_target(mon):
+                root = mirror_root(mon, {m.name: m for m in valid_monitors})
+                root_index = by_name.get(root.name)
+                if root_index is not None and root_index != i:
+                    new_boxes[i] = new_boxes[root_index].copy()
+
         return new_boxes
 
     boxes = rebuild_boxes()
@@ -209,7 +241,7 @@ def run(monitors: list[Monitor], divider: int = 8):
     def get_control_rects(toolbar):
         toolbar_margin = 10
         gap = 8
-        num_buttons = 4
+        num_buttons = 5
         available_width = toolbar.width - (toolbar_margin * 2)
         button_width = (available_width - (gap * (num_buttons - 1))) // num_buttons
         rects = []
@@ -264,6 +296,17 @@ def run(monitors: list[Monitor], divider: int = 8):
 
         if name == "disable":
             return [("Disable selected monitor", "disable")]
+
+        if name == "mirror":
+            # A monitor can mirror any other active output, but never itself.
+            # None removes mirroring from the selected monitor.
+            options = [("No mirroring", None)]
+            options.extend(
+                (f"Mirror {other.name}", other.name)
+                for other in valid_monitors
+                if other is not monitor
+            )
+            return options
         return []
 
     def get_menu_rect(anchor, option_count, item_height=36):
@@ -328,6 +371,22 @@ def run(monitors: list[Monitor], divider: int = 8):
         elif monitor is not None and name == "refresh":
             monitor.refresh_rate = str(value)
 
+        elif monitor is not None and name == "mirror":
+            # A root monitor can be selected even when its mirrored outputs
+            # are visually grouped underneath it. "No mirroring" therefore
+            # clears both its own rule and rules from outputs mirroring it.
+            if value is None:
+                monitor.mirror = None
+                by_name = {m.name: m for m in valid_monitors}
+                for other in valid_monitors:
+                    if other is not monitor and mirror_root(other, by_name) is monitor:
+                        other.mirror = None
+            else:
+                monitor.mirror = value
+            boxes = rebuild_boxes()
+            selected_index = valid_monitors.index(monitor) if monitor in valid_monitors else None
+            selected_box = boxes[selected_index] if selected_index is not None else None
+
         elif monitor is not None and name == "disable":
             monitor.disabled = "true"
             # Hyprland's disabled monitor output may use either sentinel values
@@ -378,7 +437,7 @@ def run(monitors: list[Monitor], divider: int = 8):
                             selected_monitor = valid_monitors[selected_index]
 
                     control_rects = get_control_rects(toolbar)
-                    control_names = ["rotate", "resolution", "refresh", "disable"]
+                    control_names = ["rotate", "resolution", "refresh", "mirror", "disable"]
                     clicked_dropdown_item = False
 
                     if open_dropdown is not None:
@@ -532,8 +591,19 @@ def run(monitors: list[Monitor], divider: int = 8):
         pygame.draw.rect(screen, FIELD_COLOR, field)
         pygame.draw.rect(screen, FIELD_BORDER, field, width=2)
 
-        # Monitor boxes
+        # Monitor boxes. Mirrored outputs are drawn as part of their ultimate
+        # source monitor instead of as separate rectangles.
+        by_name = {mon.name: mon for mon in valid_monitors}
+        grouped_names = {}
+        for mon in valid_monitors:
+            root = mirror_root(mon, by_name)
+            grouped_names.setdefault(root.name, []).append(mon.name)
+
         for box, monitor in zip(boxes, valid_monitors):
+            # Do not draw a second rectangle for a mirrored output.
+            if mirror_target(monitor):
+                continue
+
             is_selected = box is selected_box
             fill = BOX_SELECTED if is_selected else BOX_COLOR
             border = SELECTED_BORDER if is_selected else BOX_BORDER
@@ -541,7 +611,12 @@ def run(monitors: list[Monitor], divider: int = 8):
             pygame.draw.rect(screen, fill, box, border_radius=4)
             pygame.draw.rect(screen, border, box, width=2, border_radius=4)
 
-            label = font.render(monitor.name, True, BOX_TEXT)
+            names = grouped_names.get(monitor.name, [monitor.name])
+            label_text = " | ".join(names)
+            label = font.render(label_text, True, BOX_TEXT)
+            # Keep long grouped labels inside the monitor rectangle.
+            if label.get_width() > box.width - 12:
+                label = small_font.render(label_text, True, BOX_TEXT)
             screen.blit(label, label.get_rect(center=box.center))
 
         # Reset screen clip so toolbar and border render cleanly outside the field
@@ -552,8 +627,23 @@ def run(monitors: list[Monitor], divider: int = 8):
         pygame.draw.rect(screen, TOOLBAR_COLOR, toolbar)
         pygame.draw.rect(screen, FIELD_BORDER, toolbar, width=2)
 
-        # Four toolbar dropdowns
+        # Five toolbar dropdowns
         control_rects = get_control_rects(toolbar)
+        if selected_monitor is not None:
+            # Show the names of outputs grouped with this selected monitor.
+            mirror_members = [
+                mon.name for mon in valid_monitors
+                if mon is not selected_monitor and mirror_root(mon, {m.name: m for m in valid_monitors}) is selected_monitor
+            ]
+            own_target = getattr(selected_monitor, "mirror", None)
+            if mirror_members:
+                mirror_label = " | ".join(mirror_members)
+            elif own_target:
+                mirror_label = str(own_target)
+            else:
+                mirror_label = "Off"
+        else:
+            mirror_label = "Select monitor"
         button_specs = [
             ("Transform", transform_label(transform_value(selected_monitor)) if selected_monitor else "Select monitor"),
             ("Resolution", selected_monitor.resolution if selected_monitor else "Select monitor"),
@@ -561,6 +651,7 @@ def run(monitors: list[Monitor], divider: int = 8):
                 "Refresh rate",
                 f"{selected_monitor.refresh_rate} Hz" if selected_monitor else "Select monitor"
             ),
+            ("Mirror", mirror_label),
             ("Disable", None)
         ]
 
@@ -578,7 +669,7 @@ def run(monitors: list[Monitor], divider: int = 8):
             if open_dropdown == "enable":
                 anchor = enable_dropdown_rect
             else:
-                anchor = control_rects[["rotate", "resolution", "refresh", "disable"].index(open_dropdown)]
+                anchor = control_rects[["rotate", "resolution", "refresh", "mirror", "disable"].index(open_dropdown)]
 
             options = get_dropdown_options(open_dropdown, selected_monitor, disabled_monitors)
             item_height = 36
