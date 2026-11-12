@@ -60,18 +60,11 @@ def write_config(boxes, monitors: list[Monitor]):
     if not boxes:
         return
 
-    active_monitors = [
-        mon for mon in monitors
-        if mon.disabled.lower().strip() != "true"
-        and mon.position != "-1x-1"
-        and mon.resolution != "0x0"
-    ]
-
     offset_x, offset_y = get_offset(boxes)
 
     config = "\n"
 
-    for box, monitor in zip(boxes, active_monitors):
+    for box, monitor in zip(boxes, monitors):
         config += (
                 "hl.monitor({\n" +
                 f'    output = "{monitor.name}",\n' +
