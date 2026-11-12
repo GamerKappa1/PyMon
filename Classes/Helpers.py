@@ -76,7 +76,7 @@ def write_config(boxes, monitors: list[Monitor]):
                 "hl.monitor({\n" +
                 f'    output = "{monitor.name}",\n' +
                 f'    mode = "{monitor.resolution}@{monitor.refresh_rate}",\n' +
-                f'    position = "{box.x - offset_x}x{box.y - offset_y}",\n' +
+                f'    position = "{(box.x - offset_x) * 8}x{(box.y - offset_y) * 8}",\n' +
                 "    scale = 1,\n" +
                 f'    disabled = {"true" if str(monitor.disabled).lower().strip() == "true" else "false"},\n' +
                 f"    transform = {monitor.transform},\n"
