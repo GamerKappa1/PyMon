@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PyMon
+Comment=Monitor Layout App
+Exec=/home/<USER>/<PATH_TO_PROJECT>/.venv/bin/python /home/<USER>/<PATH_TO_PROJECT>/Main.py
+Path=/home/<USER>/<PATH_TO_PROJECT>
+Icon=/home/<USER>/<PATH_TO_PROJECT>/icon.png
+Terminal=false
+Categories=Utility;
