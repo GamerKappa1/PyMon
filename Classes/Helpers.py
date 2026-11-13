@@ -53,34 +53,57 @@ def get_offset(boxes):
     return offset_x, offset_y
 
 from Classes.Monitor import Monitor
-def write_config(boxes, monitors: list[Monitor]):
 
+def write_config(boxes, monitors: list[Monitor]):
     print("Writing Config...")
 
     if not boxes:
         return
 
+    active_monitors = [
+        mon for mon in monitors
+        if mon.disabled.lower().strip() != "true"
+        and mon.position != "-1x-1"
+        and mon.resolution != "0x0"
+    ]
+
     offset_x, offset_y = get_offset(boxes)
 
     config = "\n"
 
-    for box, monitor in zip(boxes, monitors):
-        config += (
-                "hl.monitor({\n" +
-                f'    output = "{monitor.name}",\n' +
-                f'    mode = "{monitor.resolution}@{monitor.refresh_rate}",\n' +
-                f'    position = "{(box.x - offset_x) * 8}x{(box.y - offset_y) * 8}",\n' +
-                "    scale = 1,\n" +
-                f'    disabled = {"true" if str(monitor.disabled).lower().strip() == "true" else "false"},\n' +
-                f"    transform = {monitor.transform},\n"
+    for box, monitor in zip(boxes, active_monitors):
+        mirror = (
+            getattr(monitor, "mirror", "")
+            or getattr(monitor, "mirror_of", "")
         )
 
-        # Hyprland mirror option: the value is the output name to mirror.
-        mirror_target = getattr(monitor, "mirror", None)
-        if mirror_target:
-            config += f'    mirror = "{mirror_target}",\n'
+        mirror = str(mirror).strip()
 
-        config += "})\n"
+        config += (
+            "hl.monitor({\n"
+            f'    output = "{monitor.name}",\n'
+            f'    mode = "{monitor.resolution}@{monitor.refresh_rate}",\n'
+            f'    position = "{box.x - offset_x}x{box.y - offset_y}",\n'
+            f'    scale = 1,\n'
+            f'    disabled = {"true" if monitor.disabled.lower().strip() == "true" else "false"},\n'
+            f'    transform = {monitor.transform or "0"},\n'
+            + (f'    mirror = "{mirror}",\n' if mirror and mirror.lower() not in {"none", "off"} else "")
+            + "})\n"
+        )
+
+    startline, endline = get_start_end_line_monitors()
+
+    path = Path("~/.config/hypr/hyprland.lua").expanduser()
+    content = path.read_text().split("\n")
+
+    content = (
+        "\n".join(content[:startline])
+        + config
+        + "\n".join(content[endline:])
+    )
+
+    path.write_text(content)
+
 
     startline, endline = get_start_end_line_monitors()
     path = Path("~/.config/hypr/hyprland.lua").expanduser()

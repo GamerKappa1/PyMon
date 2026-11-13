@@ -87,7 +87,7 @@ def run(monitors: list[Monitor], divider: int = 8):
 
     def mirror_target(monitor):
         """Return the configured mirror output name, or None."""
-        value = getattr(monitor, "mirror", None)
+        value = getattr(monitor, "mirror_of", None) or getattr(monitor, "mirror", None)
         if value is None:
             return None
         value = str(value).strip()
@@ -106,6 +106,19 @@ def run(monitors: list[Monitor], divider: int = 8):
         return current
 
     valid_monitors = get_valid_monitors()
+
+    def is_mirrored(monitor):
+        return bool(
+            getattr(monitor, "mirror_of", "")
+            or getattr(monitor, "mirror", "")
+        )
+
+    def is_mirror_box(box):
+        try:
+            index = boxes.index(box)
+            return index < len(valid_monitors) and is_mirrored(valid_monitors[index])
+        except ValueError:
+            return False
 
     # Rebuild boxes based on active monitors
     def rebuild_boxes():
@@ -376,13 +389,13 @@ def run(monitors: list[Monitor], divider: int = 8):
             # are visually grouped underneath it. "No mirroring" therefore
             # clears both its own rule and rules from outputs mirroring it.
             if value is None:
-                monitor.mirror = None
+                monitor.mirror_of = ""
                 by_name = {m.name: m for m in valid_monitors}
                 for other in valid_monitors:
                     if other is not monitor and mirror_root(other, by_name) is monitor:
-                        other.mirror = None
+                        other.mirror_of = ""
             else:
-                monitor.mirror = value
+                monitor.mirror_of = str(value) if value else ""
             boxes = rebuild_boxes()
             selected_index = valid_monitors.index(monitor) if monitor in valid_monitors else None
             selected_box = boxes[selected_index] if selected_index is not None else None
@@ -423,7 +436,7 @@ def run(monitors: list[Monitor], divider: int = 8):
                         if any(
                                 selected_box.colliderect(box)
                                 for box in boxes
-                                if box is not selected_box
+                                if box is not selected_box and not is_mirror_box(box)
                         ):
                             selected_box.topleft = old_position
 
@@ -495,6 +508,9 @@ def run(monitors: list[Monitor], divider: int = 8):
                             selected_box = None
 
                             for box in reversed(boxes):
+                                if is_mirror_box(box):
+                                    continue
+
                                 if box.collidepoint(event.pos):
                                     dragged_box = box
                                     selected_box = box
@@ -514,7 +530,7 @@ def run(monitors: list[Monitor], divider: int = 8):
                     if dragged_box is not None:
                         SNAP_THRESHOLD = 30
                         for box in boxes:
-                            if box is dragged_box:
+                            if box is dragged_box or is_mirror_box(box):
                                 continue
 
                             if not (dragged_box.bottom <= box.top or dragged_box.top >= box.bottom):
@@ -546,16 +562,28 @@ def run(monitors: list[Monitor], divider: int = 8):
                         box.y += dy
                 elif dragged_box is not None:
                     old_position = dragged_box.topleft
+                    old_group_positions = {
+                        i: boxes[i].topleft
+                        for i, mon in enumerate(valid_monitors)
+                        if mirror_root(mon, {m.name: m for m in valid_monitors})
+                        is valid_monitors[boxes.index(dragged_box)]
+                    }
 
                     dragged_box.x = event.pos[0] + offset_x
                     dragged_box.y = event.pos[1] + offset_y
+                    dx = dragged_box.x - old_position[0]
+                    dy = dragged_box.y - old_position[1]
 
                     if any(
                             dragged_box.colliderect(box)
                             for box in boxes
-                            if box is not dragged_box
+                            if box is not dragged_box and not is_mirror_box(box)
                     ):
                         dragged_box.topleft = old_position
+                    else:
+                        for i in old_group_positions:
+                            if boxes[i] is not dragged_box:
+                                boxes[i].move_ip(dx, dy)
 
         # Get selected monitor
         selected_monitor = None
@@ -635,7 +663,7 @@ def run(monitors: list[Monitor], divider: int = 8):
                 mon.name for mon in valid_monitors
                 if mon is not selected_monitor and mirror_root(mon, {m.name: m for m in valid_monitors}) is selected_monitor
             ]
-            own_target = getattr(selected_monitor, "mirror", None)
+            own_target = mirror_target(selected_monitor)
             if mirror_members:
                 mirror_label = " | ".join(mirror_members)
             elif own_target:
